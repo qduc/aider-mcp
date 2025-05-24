@@ -2,6 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { spawn } from "child_process";
+import { existsSync } from "fs";
+import { join } from "path";
 
 const server = new McpServer({
   name: "Aider MCP Server",
@@ -48,6 +50,12 @@ async function executeAider(args, options = {}) {
   });
 }
 
+// Helper function to check if a directory is a git repository
+function isGitRepository(dir) {
+  const gitDir = join(dir, '.git');
+  return existsSync(gitDir);
+}
+
 // Tool: Execute Aider CLI commands
 server.tool(
   "aider_execute",
@@ -55,20 +63,28 @@ server.tool(
   {
     prompt: z.string().describe("The natural language prompt or instruction to send to Aider CLI. This can be any programming task, question, or request such as 'create a Python script that reads CSV files', 'fix the bug in main.js', 'explain this function', etc."),
     workingDir: z.string().optional().describe("The absolute path to the working directory where Aider CLI should execute. If not provided, uses the current directory. This determines the context and scope of file operations."),
-    model: z.string().optional().default("deepseek/deepseek-v3").describe("AI model to use with Aider. Recommended models: 'deepseek/deepseek-v3' (fast & cost-effective for most tasks), 'deepseek/deepseek-reasoner' (complex debugging & analysis). If not specified, defaults to 'deepseek/deepseek-v3'.")
+    model: z.string().optional().default("deepseek").describe("AI model to use with Aider. Recommended models: 'deepseek' (fast & cost-effective for most tasks), 'deepseek/deepseek-reasoner' (complex debugging & analysis). If not specified, defaults to 'deepseek/deepseek-v3'.")
   },
   async ({ prompt, workingDir, model }) => {
     try {
-      // Default options: auto-commit enabled
-      const args = ["--yes", "--auto-commits"];
+      // Default options
+      const args = ["--yes", "--no-stream"];
+
+      // Determine working directory
+      const targetDir = workingDir || process.cwd();
+
+      // Only add auto-commits if we're in a git repository
+      if (isGitRepository(targetDir)) {
+        args.push("--auto-commits");
+      }
 
       // Add model option if specified
       if (model) {
         args.push("--model", model);
       }
 
-      // Add the prompt at the end
-      args.push(`"${prompt}"`);
+      // Add the message flag and prompt
+      args.push("--message", prompt);
 
       const execOptions = {};
       if (workingDir) {
