@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "codex-cli": {
+      "command": "node",
+      "args": ["/Users/qduc/src/codex-mcp/server.js"],
+      "env": {
+        "NODE_ENV": "production"
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "codex-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for Codex CLI integration",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": ["mcp", "codex", "cli", "ai", "automation"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.22.0",
+    "child_process": "^1.0.2"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
