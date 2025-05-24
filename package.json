@@ -1,14 +1,14 @@
 {
-  "name": "codex-mcp-server",
+  "name": "aider-mcp-server",
   "version": "1.0.0",
-  "description": "MCP server for Codex CLI integration",
+  "description": "MCP server for Aider CLI integration",
   "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js"
   },
-  "keywords": ["mcp", "codex", "cli", "ai", "automation"],
+  "keywords": ["mcp", "aider", "cli", "ai", "automation"],
   "author": "",
   "license": "MIT",
   "dependencies": {
