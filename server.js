@@ -22,10 +22,26 @@ class EnhancedAiderResult {
   }
 }
 
+// Helper function to find the git root directory from a starting directory
+function findGitRoot(startDir) {
+  let dir = startDir;
+  const { sep, dirname } = require('path');
+  while (dir !== sep && dir !== dirname(dir)) {
+    if (existsSync(join(dir, '.git'))) {
+      return dir;
+    }
+    dir = dirname(dir);
+  }
+  return null;
+}
+
 // Enhanced Aider execution with recovery
 async function executeAiderWithRecovery(args, options = {}) {
   const workingDir = options.cwd || process.cwd();
-  const chatHistoryPath = join(workingDir, '.aider.chat.history.md');
+  // Find git root if inside a git repo, else use workingDir
+  const gitRoot = findGitRoot(workingDir);
+  const chatHistoryDir = gitRoot || workingDir;
+  const chatHistoryPath = join(chatHistoryDir, '.aider.chat.history.md');
 
   // Record chat history size before execution
   let preSize = 0;
@@ -79,12 +95,19 @@ function extractNewChatContent(chatHistoryPath, preSize) {
 
 // Parse latest conversation to find post-action content
 function parseLatestConversation(chatContent) {
-  // Look for complete <summarize>...</summarize> blocks (must start with opening tag on new line)
-  const summarizeBlocks = chatContent.matchAll(/\n<summarize>(.*?)<\/summarize>/gs) || [];
+  console.error('Debug - Chat content length:', chatContent.length);
+  console.error('Debug - Chat content preview:', chatContent.substring(0, 500));
 
-  if (summarizeBlocks.length > 0) {
-    // Return just the content of the last summarize block, trimmed
-    return summarizeBlocks[summarizeBlocks.length - 1][1].trim();
+  // Look for complete <summary>...</summary> blocks (must start with opening tag on new line)
+  // Use strict pattern to avoid matching incomplete tags
+  const summarizeMatches = Array.from(chatContent.matchAll(/\n<summary>\s*(.*?)\s*<\/summary>/gs));
+
+  console.error('Debug - Summarize matches found:', summarizeMatches.length);
+
+  if (summarizeMatches.length > 0) {
+    const lastMatch = summarizeMatches[summarizeMatches.length - 1][1].trim();
+    console.error('Debug - Last match content:', lastMatch);
+    return lastMatch;
   }
 
   // If no complete summarize blocks found, return empty string
@@ -162,7 +185,7 @@ function isGitRepository(dir) {
 function formatEnhancedOutput(result) {
   // Return the summary if available
   if (result.summary) {
-    return `📋 Summary: ${result.summary}`;
+    return `📋 Summary:\n${result.summary}`;
   }
 
   // If no summary but execution was successful, provide basic feedback
@@ -182,15 +205,35 @@ async function executeAiderCommand({
   model,
   architectMode = false,
   architectModel,
-  editorModel
+  editorModel,
+  restoreChatHistory = false
 }) {
   try {
     const args = ["--yes", "--no-stream"];
     const targetDir = workingDir || process.cwd();
 
+    // Prevent running in root directory for safety
+    if (targetDir === '/') {
+      return {
+        content: [{
+          type: "text",
+          text: "⛔ ERROR: Cannot execute Aider in the root directory for safety reasons. Please specify a valid project directory.",
+        }],
+        error: {
+          code: "ROOT_DIR_FORBIDDEN",
+          message: "Cannot execute Aider in the root directory"
+        }
+      };
+    }
+
     // Add architect mode if specified
     if (architectMode) {
       args.push("--architect");
+    }
+
+    // Add restore chat history if specified
+    if (restoreChatHistory) {
+      args.push("--restore-chat-history");
     }
 
     // Only add auto-commits if we're in a git repository
@@ -216,7 +259,7 @@ async function executeAiderCommand({
     }
 
     // Add the message with summary instruction
-    const fullPrompt = `${prompt}\n\nAfter completing the task, please summarize what you did in a <summarize> tag. Include what files were created/modified and the key changes made.`;
+    const fullPrompt = `${prompt}\n\nAfter completing the task, please summarize the result in a <summary></summary> tag.`;
     args.push("--message", fullPrompt);
 
     const execOptions = {};
@@ -252,16 +295,18 @@ server.tool(
   {
     prompt: z.string().describe("The natural language prompt or instruction to send to Aider CLI. This can be any programming task, question, or request such as 'create a Python script that reads CSV files', 'fix the bug in main.js', 'explain this function', etc."),
     workingDir: z.string().optional().describe("The absolute path to the working directory where Aider CLI should execute. If not provided, uses the current directory. This determines the context and scope of file operations."),
-    files: z.array(z.string()).optional().describe("Specific files for Aider to focus on. Allows you to limit Aider's scope to only work with certain files."),
-    model: z.string().optional().default("deepseek").describe("AI model to use with Aider. Available models: 'deepseek/deepseek-reasoner' (excellent reasoning and cost-effective), 'gemini/gemini-2.5-pro-preview-05-06' (high performance and excellent balance), 'deepseek' (fast and economical).")
+    files: z.array(z.string()).optional().describe("Specific files required for the task."),
+    model: z.string().optional().default("deepseek").describe("AI model to use with Aider. Available models: 'deepseek/deepseek-reasoner' (excellent reasoning and cost-effective), 'gemini/gemini-2.5-pro-preview-05-06' (high performance and excellent balance), 'deepseek' (fast and economical)."),
+    restoreChatHistory: z.boolean().optional().default(false).describe("Enable Aider to remember past conversations from chat history. Useful when the current task needs to refer to previous context or build upon earlier work.")
   },
-  async ({ prompt, workingDir, files, model }) => {
+  async ({ prompt, workingDir, files, model, restoreChatHistory }) => {
     return executeAiderCommand({
       prompt,
       workingDir,
       files,
       model,
-      architectMode: false
+      architectMode: false,
+      restoreChatHistory
     });
   }
 );
@@ -273,18 +318,20 @@ server.tool(
   {
     prompt: z.string().describe("The complex coding task or architectural challenge to solve. Architect mode excels at breaking down large problems, planning implementations, and coordinating multiple file changes."),
     workingDir: z.string().optional().describe("The absolute path to the working directory where Aider CLI should execute. If not provided, uses the current directory."),
-    files: z.array(z.string()).optional().describe("Specific files for Aider to focus on. Allows you to limit Aider's scope to only work with certain files."),
+    files: z.array(z.string()).optional().describe("Specific files required for the task."),
     architectModel: z.string().optional().default("deepseek/deepseek-reasoner").describe("Architect model for high-level planning. Available models: 'deepseek/deepseek-reasoner' (excellent reasoning and cost-effective), 'gemini/gemini-2.5-pro-preview-05-06' (high performance), 'deepseek' (fast and economical). The architect describes solutions without editing files."),
-    editorModel: z.string().optional().describe("Editor model for implementation. Available models: 'deepseek/deepseek-reasoner', 'gemini/gemini-2.5-pro-preview-05-06', 'deepseek'. If not specified, Aider chooses a suitable default based on the architect model.")
+    editorModel: z.string().optional().describe("Editor model for implementation. Available models: 'deepseek/deepseek-reasoner', 'gemini/gemini-2.5-pro-preview-05-06', 'deepseek'. If not specified, Aider chooses a suitable default based on the architect model."),
+    restoreChatHistory: z.boolean().optional().default(false).describe("Enable Aider to remember past conversations from chat history. Useful when the current task needs to refer to previous context or build upon earlier work.")
   },
-  async ({ prompt, workingDir, files, architectModel, editorModel }) => {
+  async ({ prompt, workingDir, files, architectModel, editorModel, restoreChatHistory }) => {
     return executeAiderCommand({
       prompt,
       workingDir,
       files,
       architectMode: true,
       architectModel,
-      editorModel
+      editorModel,
+      restoreChatHistory
     });
   }
 );
