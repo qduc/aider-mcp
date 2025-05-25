@@ -3,7 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { spawn } from "child_process";
 import { existsSync, readFileSync, statSync } from "fs";
-import { join } from "path";
+import { join, dirname } from "path";
 import { homedir } from "os";
 
 const server = new McpServer({
@@ -32,6 +32,28 @@ function findGitRoot(startDir) {
     dir = dirname(dir);
   }
   return null;
+}
+
+// Helper function to find Aider executable path
+function findAiderExecutable() {
+  // Common installation paths for Aider
+  const commonPaths = [
+    join(homedir(), '.local', 'bin', 'aider'),
+    '/usr/local/bin/aider',
+    '/usr/bin/aider',
+    '/opt/homebrew/bin/aider',
+    join(homedir(), '.cargo', 'bin', 'aider')
+  ];
+
+  // Check each common path
+  for (const path of commonPaths) {
+    if (existsSync(path)) {
+      return path;
+    }
+  }
+
+  // Fallback to 'aider' in PATH - let the system resolve it
+  return 'aider';
 }
 
 // Enhanced Aider execution with recovery
@@ -136,7 +158,7 @@ function extractSummary(text) {
 // Helper function to execute Aider CLI commands
 async function executeAider(args, options = {}) {
   return new Promise((resolve, reject) => {
-    const aiderPath = join(homedir(), '.local', 'bin', 'aider');
+    const aiderPath = findAiderExecutable();
 
     console.error(`Spawning process:`, {
       command: aiderPath,
