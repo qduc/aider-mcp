@@ -25,8 +25,7 @@ class EnhancedAiderResult {
 // Helper function to find the git root directory from a starting directory
 function findGitRoot(startDir) {
   let dir = startDir;
-  const { sep, dirname } = require('path');
-  while (dir !== sep && dir !== dirname(dir)) {
+  while (dir !== '/' && dir !== dirname(dir)) {
     if (existsSync(join(dir, '.git'))) {
       return dir;
     }
