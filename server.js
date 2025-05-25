@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { spawn } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 
@@ -11,12 +11,111 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
+// Enhanced result structure
+class EnhancedAiderResult {
+  constructor({
+    summary = null,
+    executionSuccessful = false
+  } = {}) {
+    this.summary = summary;
+    this.executionSuccessful = executionSuccessful;
+  }
+}
+
+// Enhanced Aider execution with recovery
+async function executeAiderWithRecovery(args, options = {}) {
+  const workingDir = options.cwd || process.cwd();
+  const chatHistoryPath = join(workingDir, '.aider.chat.history.md');
+
+  // Record chat history size before execution
+  let preSize = 0;
+  if (existsSync(chatHistoryPath)) {
+    try {
+      preSize = statSync(chatHistoryPath).size;
+    } catch (error) {
+      console.error('Warning: Could not read chat history size:', error.message);
+    }
+  }
+
+  // Execute original Aider command
+  const truncatedResult = await executeAider(args, options);
+
+  // Small delay to ensure file is written
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  // Extract recovered content from chat history
+  const recoveredContent = extractNewChatContent(chatHistoryPath, preSize);
+
+  // Debug logging
+  console.error('Debug - Chat history path:', chatHistoryPath);
+  console.error('Debug - Pre-execution size:', preSize);
+  console.error('Debug - Recovered content length:', recoveredContent.length);
+  console.error('Debug - Recovered content preview:', recoveredContent.substring(0, 200));
+
+  // Analyze complete output
+  const analysis = analyzeCompleteOutput(truncatedResult.stdout, recoveredContent);
+
+  return new EnhancedAiderResult({
+    summary: analysis.summary,
+    executionSuccessful: analysis.successful
+  });
+}
+
+// Extract new content from chat history after execution
+function extractNewChatContent(chatHistoryPath, preSize) {
+  if (!existsSync(chatHistoryPath)) {
+    return "";
+  }
+
+  try {
+    const content = readFileSync(chatHistoryPath, 'utf-8');
+    const newContent = content.slice(preSize);
+    return parseLatestConversation(newContent);
+  } catch (error) {
+    console.error('Warning: Could not read chat history:', error.message);
+    return "";
+  }
+}
+
+// Parse latest conversation to find post-action content
+function parseLatestConversation(chatContent) {
+  // Look for complete <summarize>...</summarize> blocks (must start with opening tag on new line)
+  const summarizeBlocks = chatContent.matchAll(/\n<summarize>(.*?)<\/summarize>/gs) || [];
+
+  if (summarizeBlocks.length > 0) {
+    // Return just the content of the last summarize block, trimmed
+    return summarizeBlocks[summarizeBlocks.length - 1][1].trim();
+  }
+
+  // If no complete summarize blocks found, return empty string
+  return "";
+}
+
+// Analyze complete output combining truncated + recovered
+function analyzeCompleteOutput(truncatedOutput, recoveredContent) {
+  // The recoveredContent is already the extracted summary content
+  const summary = recoveredContent && recoveredContent.trim() ? recoveredContent.trim() : null;
+
+  // Check if execution was successful (basic check for any meaningful output)
+  const successful = summary !== null;
+
+  return {
+    summary,
+    successful
+  };
+}
+
+// Extract summary from recovered content
+function extractSummary(text) {
+  const match = text.match(/<summarize>(.*?)<\/summarize>/s);
+  return match ? match[1].trim() : null;
+}
+
 // Helper function to execute Aider CLI commands
 async function executeAider(args, options = {}) {
   return new Promise((resolve, reject) => {
     const aiderPath = join(homedir(), '.local', 'bin', 'aider');
 
-    // Log detailed command information to stderr to avoid interfering with JSON-RPC
     console.error(`Spawning process:`, {
       command: aiderPath,
       args: args,
@@ -59,10 +158,97 @@ function isGitRepository(dir) {
   return existsSync(gitDir);
 }
 
-// Tool: Execute Aider CLI commands
+// Enhanced helper function to format output with recovery
+function formatEnhancedOutput(result) {
+  // Return the summary if available
+  if (result.summary) {
+    return `📋 Summary: ${result.summary}`;
+  }
+
+  // If no summary but execution was successful, provide basic feedback
+  if (result.executionSuccessful) {
+    return "✅ Aider completed successfully (no summary generated)";
+  }
+
+  // If execution failed or no meaningful output
+  return "❌ Aider execution completed but no summary was generated";
+}
+
+// Shared function to execute Aider commands with common logic
+async function executeAiderCommand({
+  prompt,
+  workingDir,
+  files,
+  model,
+  architectMode = false,
+  architectModel,
+  editorModel
+}) {
+  try {
+    const args = ["--yes", "--no-stream"];
+    const targetDir = workingDir || process.cwd();
+
+    // Add architect mode if specified
+    if (architectMode) {
+      args.push("--architect");
+    }
+
+    // Only add auto-commits if we're in a git repository
+    if (isGitRepository(targetDir)) {
+      args.push("--auto-commits");
+    }
+
+    // Add model options
+    if (architectMode && architectModel) {
+      args.push("--model", architectModel);
+      if (editorModel) {
+        args.push("--editor-model", editorModel);
+      }
+    } else if (model) {
+      args.push("--model", model);
+    }
+
+    // Add files if specified
+    if (files && files.length > 0) {
+      files.forEach(file => {
+        args.push("--file", file);
+      });
+    }
+
+    // Add the message with summary instruction
+    const fullPrompt = `${prompt}\n\nAfter completing the task, please summarize what you did in a <summarize> tag. Include what files were created/modified and the key changes made.`;
+    args.push("--message", fullPrompt);
+
+    const execOptions = {};
+    if (workingDir) {
+      execOptions.cwd = workingDir;
+    }
+
+    // Use enhanced execution with recovery
+    const result = await executeAiderWithRecovery(args, execOptions);
+    const formattedOutput = formatEnhancedOutput(result);
+
+    return {
+      content: [{
+        type: "text",
+        text: formattedOutput
+      }]
+    };
+  } catch (error) {
+    const mode = architectMode ? "architect mode" : "CLI";
+    return {
+      content: [{
+        type: "text",
+        text: `Error executing Aider ${mode}: ${error.message}`
+      }]
+    };
+  }
+}
+
+// Tool: Execute Aider CLI commands (Enhanced)
 server.tool(
   "aider_execute",
-  "Execute Aider CLI commands with natural language prompts. Runs Aider CLI with auto-commit enabled, allowing AI-powered code generation, debugging, refactoring, and file operations within a specified working directory.",
+  "Execute Aider CLI commands with natural language prompts. Returns only the summary of what was accomplished.",
   {
     prompt: z.string().describe("The natural language prompt or instruction to send to Aider CLI. This can be any programming task, question, or request such as 'create a Python script that reads CSV files', 'fix the bug in main.js', 'explain this function', etc."),
     workingDir: z.string().optional().describe("The absolute path to the working directory where Aider CLI should execute. If not provided, uses the current directory. This determines the context and scope of file operations."),
@@ -70,61 +256,20 @@ server.tool(
     model: z.string().optional().default("deepseek").describe("AI model to use with Aider. Available models: 'deepseek/deepseek-reasoner' (excellent reasoning and cost-effective), 'gemini/gemini-2.5-pro-preview-05-06' (high performance and excellent balance), 'deepseek' (fast and economical).")
   },
   async ({ prompt, workingDir, files, model }) => {
-    try {
-      // Default options
-      const args = ["--yes", "--no-stream"];
-
-      // Determine working directory
-      const targetDir = workingDir || process.cwd();
-
-      // Only add auto-commits if we're in a git repository
-      if (isGitRepository(targetDir)) {
-        args.push("--auto-commits");
-      }
-
-      // Add model option if specified
-      if (model) {
-        args.push("--model", model);
-      }
-
-      // Add files if specified
-      if (files && files.length > 0) {
-        files.forEach(file => {
-          args.push("--file", file);
-        });
-      }
-
-      // Add the message flag and prompt
-      args.push("--message", prompt);
-
-      const execOptions = {};
-      if (workingDir) {
-        execOptions.cwd = workingDir;
-      }
-
-      const result = await executeAider(args, execOptions);
-
-      return {
-        content: [{
-          type: "text",
-          text: `Aider CLI Output:\n${result.stdout}\n\nErrors (if any):\n${result.stderr}`
-        }]
-      };
-    } catch (error) {
-      return {
-        content: [{
-          type: "text",
-          text: `Error executing Aider CLI: ${error.message}`
-        }]
-      };
-    }
+    return executeAiderCommand({
+      prompt,
+      workingDir,
+      files,
+      model,
+      architectMode: false
+    });
   }
 );
 
-// Tool: Execute Aider CLI in Architect Mode
+// Tool: Execute Aider CLI in Architect Mode (Enhanced)
 server.tool(
   "aider_architect",
-  "Execute Aider CLI in architect mode for complex coding tasks. Uses a two-model approach: an architect model for high-level planning and an editor model for implementation. Best for complex refactoring, feature development, and architectural changes.",
+  "Execute Aider CLI in architect mode for complex coding tasks. Returns only the summary of what was accomplished.",
   {
     prompt: z.string().describe("The complex coding task or architectural challenge to solve. Architect mode excels at breaking down large problems, planning implementations, and coordinating multiple file changes."),
     workingDir: z.string().optional().describe("The absolute path to the working directory where Aider CLI should execute. If not provided, uses the current directory."),
@@ -133,59 +278,14 @@ server.tool(
     editorModel: z.string().optional().describe("Editor model for implementation. Available models: 'deepseek/deepseek-reasoner', 'gemini/gemini-2.5-pro-preview-05-06', 'deepseek'. If not specified, Aider chooses a suitable default based on the architect model.")
   },
   async ({ prompt, workingDir, files, architectModel, editorModel }) => {
-    try {
-      // Default options for architect mode
-      const args = ["--yes", "--no-stream", "--architect"];
-
-      // Determine working directory
-      const targetDir = workingDir || process.cwd();
-
-      // Only add auto-commits if we're in a git repository
-      if (isGitRepository(targetDir)) {
-        args.push("--auto-commits");
-      }
-
-      // Add architect model (main model in architect mode)
-      if (architectModel) {
-        args.push("--model", architectModel);
-      }
-
-      // Add editor model if specified
-      if (editorModel) {
-        args.push("--editor-model", editorModel);
-      }
-
-      // Add files if specified
-      if (files && files.length > 0) {
-        files.forEach(file => {
-          args.push("--file", file);
-        });
-      }
-
-      // Add the message flag and prompt
-      args.push("--message", prompt);
-
-      const execOptions = {};
-      if (workingDir) {
-        execOptions.cwd = workingDir;
-      }
-
-      const result = await executeAider(args, execOptions);
-
-      return {
-        content: [{
-          type: "text",
-          text: `Aider Architect Mode Output:\n${result.stdout}\n\nErrors (if any):\n${result.stderr}`
-        }]
-      };
-    } catch (error) {
-      return {
-        content: [{
-          type: "text",
-          text: `Error executing Aider in architect mode: ${error.message}`
-        }]
-      };
-    }
+    return executeAiderCommand({
+      prompt,
+      workingDir,
+      files,
+      architectMode: true,
+      architectModel,
+      editorModel
+    });
   }
 );
 
