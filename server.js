@@ -4,6 +4,7 @@ import { z } from "zod";
 import { spawn } from "child_process";
 import { existsSync } from "fs";
 import { join } from "path";
+import { homedir } from "os";
 
 const server = new McpServer({
   name: "Aider MCP Server",
@@ -13,14 +14,16 @@ const server = new McpServer({
 // Helper function to execute Aider CLI commands
 async function executeAider(args, options = {}) {
   return new Promise((resolve, reject) => {
-    // Log detailed command information
-    console.log(`Spawning process:`, {
-      command: 'aider',
+    const aiderPath = join(homedir(), '.local', 'bin', 'aider');
+
+    // Log detailed command information to stderr to avoid interfering with JSON-RPC
+    console.error(`Spawning process:`, {
+      command: aiderPath,
       args: args,
       options: options
     });
 
-    const aider = spawn("aider", args, {
+    const aider = spawn(aiderPath, args, {
       stdio: ["pipe", "pipe", "pipe"],
       ...options
     });
@@ -63,9 +66,10 @@ server.tool(
   {
     prompt: z.string().describe("The natural language prompt or instruction to send to Aider CLI. This can be any programming task, question, or request such as 'create a Python script that reads CSV files', 'fix the bug in main.js', 'explain this function', etc."),
     workingDir: z.string().optional().describe("The absolute path to the working directory where Aider CLI should execute. If not provided, uses the current directory. This determines the context and scope of file operations."),
+    files: z.array(z.string()).optional().describe("Specific files for Aider to focus on. Allows you to limit Aider's scope to only work with certain files."),
     model: z.string().optional().default("deepseek").describe("AI model to use with Aider. Available models: 'deepseek/deepseek-reasoner' (excellent reasoning and cost-effective), 'gemini/gemini-2.5-pro-preview-05-06' (high performance and excellent balance), 'deepseek' (fast and economical).")
   },
-  async ({ prompt, workingDir, model }) => {
+  async ({ prompt, workingDir, files, model }) => {
     try {
       // Default options
       const args = ["--yes", "--no-stream"];
@@ -81,6 +85,13 @@ server.tool(
       // Add model option if specified
       if (model) {
         args.push("--model", model);
+      }
+
+      // Add files if specified
+      if (files && files.length > 0) {
+        files.forEach(file => {
+          args.push("--file", file);
+        });
       }
 
       // Add the message flag and prompt
@@ -117,10 +128,11 @@ server.tool(
   {
     prompt: z.string().describe("The complex coding task or architectural challenge to solve. Architect mode excels at breaking down large problems, planning implementations, and coordinating multiple file changes."),
     workingDir: z.string().optional().describe("The absolute path to the working directory where Aider CLI should execute. If not provided, uses the current directory."),
+    files: z.array(z.string()).optional().describe("Specific files for Aider to focus on. Allows you to limit Aider's scope to only work with certain files."),
     architectModel: z.string().optional().default("deepseek/deepseek-reasoner").describe("Architect model for high-level planning. Available models: 'deepseek/deepseek-reasoner' (excellent reasoning and cost-effective), 'gemini/gemini-2.5-pro-preview-05-06' (high performance), 'deepseek' (fast and economical). The architect describes solutions without editing files."),
     editorModel: z.string().optional().describe("Editor model for implementation. Available models: 'deepseek/deepseek-reasoner', 'gemini/gemini-2.5-pro-preview-05-06', 'deepseek'. If not specified, Aider chooses a suitable default based on the architect model.")
   },
-  async ({ prompt, workingDir, architectModel, editorModel }) => {
+  async ({ prompt, workingDir, files, architectModel, editorModel }) => {
     try {
       // Default options for architect mode
       const args = ["--yes", "--no-stream", "--architect"];
@@ -141,6 +153,13 @@ server.tool(
       // Add editor model if specified
       if (editorModel) {
         args.push("--editor-model", editorModel);
+      }
+
+      // Add files if specified
+      if (files && files.length > 0) {
+        files.forEach(file => {
+          args.push("--file", file);
+        });
       }
 
       // Add the message flag and prompt
@@ -220,4 +239,5 @@ server.connect(transport).catch((error) => {
   process.exit(1);
 });
 
-console.log("Aider MCP Server started successfully");
+// Don't log to stdout as it interferes with JSON-RPC communication
+// console.log("Aider MCP Server started successfully");
