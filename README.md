@@ -7,16 +7,22 @@ A Model Context Protocol (MCP) server that integrates with Aider CLI, enabling A
 This MCP server acts as a bridge between AI models and Aider CLI, allowing you to:
 
 - Execute natural language programming prompts via Aider CLI
-- Perform code generation, debugging, and refactoring tasks
+- Perform code generation, debugging, and refactoring tasks in focused, one-shot sessions
 - Access file operations within specified working directories
-- Select from various AI models (Claude, GPT-4, DeepSeek, etc.)
+- Select from various AI models (DeepSeek Reasoner, Gemini 2.5 Pro, etc.)
+- Use architect mode for complex tasks requiring planning and coordination
+- Maintain context across sessions with chat history restoration
 
 ## Features
 
 - **Natural Language Processing**: Send programming tasks and questions in plain English
+- **Architect Mode**: Break down complex problems with specialized architect and editor models
 - **Auto-commit Mode**: Automatically apply and commit code changes suggested by Aider
 - **Working Directory Control**: Specify custom working directories for file operations
-- **Model Selection**: Choose from various AI models (Claude, GPT-4, DeepSeek, etc.)
+- **Advanced Model Selection**: Choose from optimized AI models including DeepSeek Reasoner, Gemini 2.5 Pro, and more
+- **Chat History Restoration**: Maintain context across sessions for continuous development
+- **Enhanced Output Recovery**: Intelligent summary extraction from Aider's chat history
+- **File-Specific Operations**: Target specific files for focused editing tasks
 - **Error Handling**: Comprehensive error reporting and logging
 
 ## Prerequisites
@@ -76,12 +82,29 @@ Configure your MCP client to connect to this server. For Claude Desktop, add the
 
 #### `aider_execute`
 
-Execute Aider CLI commands with natural language prompts.
+Execute Aider CLI commands with natural language prompts. Ideal for focused, one-shot coding tasks.
 
 **Parameters:**
 - `prompt` (required): Natural language instruction for Aider CLI
 - `workingDir` (optional): Absolute path to working directory
-- `model` (optional): AI model to use (e.g., "sonnet", "gpt-4o", "deepseek", "o3-mini")
+- `files` (optional): Array of specific files required for the task
+- `model` (optional): AI model to use (default: "deepseek")
+  - `deepseek/deepseek-reasoner`: Excellent reasoning and cost-effective
+  - `gemini/gemini-2.5-pro-preview-05-06`: High performance and excellent balance
+  - `deepseek`: Fast and economical
+- `restoreChatHistory` (optional): Enable Aider to remember past conversations
+
+#### `aider_architect`
+
+Execute Aider CLI in architect mode for complex coding tasks requiring planning and coordination.
+
+**Parameters:**
+- `prompt` (required): Complex coding task or architectural challenge
+- `workingDir` (optional): Absolute path to working directory
+- `files` (optional): Array of specific files required for the task
+- `architectModel` (optional): Model for high-level planning (default: "deepseek/deepseek-reasoner")
+- `editorModel` (optional): Model for implementation (auto-selected if not specified)
+- `restoreChatHistory` (optional): Enable Aider to remember past conversations
 
 **Example Usage:**
 ```
@@ -121,9 +144,19 @@ Fix the memory leak in the Node.js application in the /path/to/project directory
 Refactor the legacy jQuery code to modern vanilla JavaScript
 ```
 
-### File Operations
+### Architect Mode for Complex Tasks
 ```
-Create a comprehensive test suite for the API endpoints in the current project
+Design and implement a microservices architecture for a task management system with authentication, real-time updates, and database persistence
+```
+
+### Working with Specific Files
+```
+Refactor the React components in src/components/UserManagement.js to use TypeScript and add proper error handling
+```
+
+### Chat History Context
+```
+Continue improving the API based on our previous discussion about rate limiting and error handling
 ```
 
 ## API Reference
@@ -134,6 +167,13 @@ Executes Aider CLI with the following options:
 - `--yes`: Accept all suggestions automatically
 - `--auto-commits`: Automatically commit changes
 - `--model <model>`: Specify the AI model to use
+
+### Tool: aider_architect
+
+Executes Aider CLI in architect mode with the following options:
+- `--architect`: Enable architect mode for complex tasks
+- `--model <architectModel>`: Specify the architect model for planning
+- `--editor-model <editorModel>`: Specify the editor model for implementation
 
 ### Error Handling
 
