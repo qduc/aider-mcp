@@ -312,7 +312,7 @@ async function executeAiderCommand({
 // Tool: Execute Aider CLI commands (Enhanced)
 server.tool(
   "aider_execute",
-  "Execute Aider CLI commands with natural language prompts. Returns only the summary of what was accomplished.",
+  "Execute Aider CLI commands with natural language prompts. Aider is a one-shot coding assistant that excels at isolated tasks focused on a specific set of files. Returns only the summary of what was accomplished.",
   {
     prompt: z.string().describe("The natural language prompt or instruction to send to Aider CLI. This can be any programming task, question, or request such as 'create a Python script that reads CSV files', 'fix the bug in main.js', 'explain this function', etc."),
     workingDir: z.string().optional().describe("The absolute path to the working directory where Aider CLI should execute. If not provided, uses the current directory. This determines the context and scope of file operations."),
@@ -335,7 +335,7 @@ server.tool(
 // Tool: Execute Aider CLI in Architect Mode (Enhanced)
 server.tool(
   "aider_architect",
-  "Execute Aider CLI in architect mode for complex coding tasks. Returns only the summary of what was accomplished.",
+  "Execute Aider CLI in architect mode for complex coding tasks. Aider is a one-shot coding assistant that excels at isolated tasks focused on a specific set of files. Architect mode is designed for breaking down large problems into manageable components. Returns only the summary of what was accomplished.",
   {
     prompt: z.string().describe("The complex coding task or architectural challenge to solve. Architect mode excels at breaking down large problems, planning implementations, and coordinating multiple file changes."),
     workingDir: z.string().optional().describe("The absolute path to the working directory where Aider CLI should execute. If not provided, uses the current directory."),
