@@ -5,6 +5,7 @@ import { spawn } from "child_process";
 import { existsSync, readFileSync, statSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
+import { error } from "console";
 
 const server = new McpServer({
   name: "Aider MCP Server",
@@ -15,9 +16,11 @@ const server = new McpServer({
 class EnhancedAiderResult {
   constructor({
     summary = null,
+    error = null,
     executionSuccessful = false
   } = {}) {
     this.summary = summary;
+    this.error = error;
     this.executionSuccessful = executionSuccessful;
   }
 }
@@ -86,14 +89,16 @@ async function executeAiderWithRecovery(args, options = {}) {
   // Debug logging
   console.error('Debug - Chat history path:', chatHistoryPath);
   console.error('Debug - Pre-execution size:', preSize);
-  console.error('Debug - Recovered content length:', recoveredContent.length);
-  console.error('Debug - Recovered content preview:', recoveredContent.substring(0, 200));
+  console.error('Debug - Recovered content type:', recoveredContent.type);
+  console.error('Debug - Recovered content length:', recoveredContent.content.length);
+  console.error('Debug - Recovered content preview:', recoveredContent.content.substring(0, 200));
 
   // Analyze complete output
   const analysis = analyzeCompleteOutput(truncatedResult.stdout, recoveredContent);
 
   return new EnhancedAiderResult({
     summary: analysis.summary,
+    error: analysis.error,
     executionSuccessful: analysis.successful
   });
 }
@@ -128,23 +133,63 @@ function parseLatestConversation(chatContent) {
   if (summarizeMatches.length > 0) {
     const lastMatch = summarizeMatches[summarizeMatches.length - 1][1].trim();
     console.error('Debug - Last match content:', lastMatch);
-    return lastMatch;
+    return { type: 'summary', content: lastMatch };
   }
 
-  // If no complete summarize blocks found, return empty string
-  return "";
+  // Look for error patterns - flexible matching for Error, Exception and related keywords
+  const errorPatterns = [
+    // LiteLLM and API errors
+    /litellm\.[A-Za-z]*Error:\s*(.*?)(?=\n\n|\n[A-Z]|\n$|$)/gs,
+    // General Exception patterns
+    /([A-Za-z]*Exception):\s*(.*?)(?=\n\n|\n[A-Z]|\n$|$)/gs,
+    // General Error patterns
+    /([A-Za-z]*Error):\s*(.*?)(?=\n\n|\n[A-Z]|\n$|$)/gs,
+    // Traceback patterns
+    /Traceback \(most recent call last\):(.*?)(?=\n\n|\n[A-Z]|\n$|$)/gs,
+    // HTTP error patterns
+    /HTTP\s+\d{3}\s+Error:(.*?)(?=\n\n|\n[A-Z]|\n$|$)/gs
+  ];
+
+  for (const pattern of errorPatterns) {
+    const errorMatches = Array.from(chatContent.matchAll(pattern));
+    console.error('Debug - Error matches found for pattern:', pattern, 'matches:', errorMatches.length);
+
+    if (errorMatches.length > 0) {
+      const lastErrorMatch = errorMatches[errorMatches.length - 1];
+      let errorContent = lastErrorMatch[0].trim();
+
+      // Clean up the error content - remove excessive whitespace and normalize
+      errorContent = errorContent.replace(/\s+/g, ' ').trim();
+
+      console.error('Debug - Last error match content:', errorContent);
+      return { type: 'error', content: errorContent };
+    }
+  }
+
+  // If no complete summarize blocks or errors found, return empty
+  return { type: 'none', content: "" };
 }
 
 // Analyze complete output combining truncated + recovered
-function analyzeCompleteOutput(truncatedOutput, recoveredContent) {
-  // The recoveredContent is already the extracted summary content
-  const summary = recoveredContent && recoveredContent.trim() ? recoveredContent.trim() : null;
+function analyzeCompleteOutput(truncatedOutput, recoveredResult) {
+  // recoveredResult is now an object with type and content
+  let summary = null;
+  let error = null;
 
-  // Check if execution was successful (basic check for any meaningful output)
-  const successful = summary !== null;
+  if (recoveredResult && recoveredResult.content && recoveredResult.content.trim()) {
+    if (recoveredResult.type === 'summary') {
+      summary = recoveredResult.content.trim();
+    } else if (recoveredResult.type === 'error') {
+      error = recoveredResult.content.trim();
+    }
+  }
+
+  // Check if execution was successful (has summary and no error)
+  const successful = summary !== null && error === null;
 
   return {
     summary,
+    error,
     successful
   };
 }
@@ -204,12 +249,17 @@ function isGitRepository(dir) {
 
 // Enhanced helper function to format output with recovery
 function formatEnhancedOutput(result) {
+  // Return error if detected
+  if (result.error) {
+    return `🚨 Error Detected:\n${result.error}`;
+  }
+
   // Return the summary if available
   if (result.summary) {
     return `📋 Summary:\n${result.summary}`;
   }
 
-  // If no summary but execution was successful, provide basic feedback
+  // If no summary and no error but execution was successful, provide basic feedback
   if (result.executionSuccessful) {
     return "✅ Aider completed successfully (no summary generated)";
   }
@@ -274,6 +324,15 @@ async function executeAiderCommand({
 
     // Add files if specified
     if (files && files.length > 0) {
+      if (files.length > 10) {
+          // Return error
+          return {
+            content: [{
+              type: "text",
+              text: "⛔ ERROR: Too many files specified. Aider supports a maximum of 10 files per command to ensure performance and reliability."
+            }]
+          }
+      }
       files.forEach(file => {
         args.push("--file", file);
       });
